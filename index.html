@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!-- 
+/* ##############################################################################
+####		created by João Gabriel Corrêa da Silva			            	####
+####	    https://www.joaogabrielcorreadasilva.com.br                    	####
+############################################################################## */
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="style.css">
+    <title>Game</title>
+</head>
+<body>
+    <canvas id="game"></canvas>
+    <div class="game-ui">
+        <div class="in-game">
+            <div class="actions">
+                <button class="icon-only" id="pauseBtn"><span class="material-symbols-outlined">pause</span></button>
+                <button class="icon-only" id="muteBtn"><span class="material-symbols-outlined">no_sound</span></button>
+            </div>
+            <span id="points">-</span>
+        </div>
+        <div class="in-pause show first">
+            <div class="best">
+                <span id="bestLabel">Record!</span>
+                <span id="best">-</span>
+            </div>
+            <button id="startBtn"><span class="material-symbols-outlined">play_circle</span></button>
+        </div>
+    </div>
+    <script src="game.js"></script>
+</body>
+</html>
