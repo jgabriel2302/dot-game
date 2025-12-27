@@ -55,6 +55,17 @@
             isDown: false,
         };
 
+        tilt = {
+            enabled: true,
+            gamma: 0,
+            smoothGamma: 0,
+            smoothing: 0.15,
+            deadzone: 2,
+            maxGamma: 25,
+            scale: 1,
+            initialized: false,
+        };
+
         bindings = [
             { bind: "up", input: "w" },
             { bind: "down", input: "s" },
@@ -79,6 +90,9 @@
             { bind: "down", input: "swipe_down" },
             { bind: "left", input: "swipe_left" },
             { bind: "right", input: "swipe_right" },
+
+            { bind: "left", input: "tilt_left" },
+            { bind: "right", input: "tilt_right" },
         ];
 
         constructor({ element = window } = {}) {
@@ -125,27 +139,65 @@
                 window.addEventListener("pointercancel", (e) => this.#onPointerUp(e), { passive: false });
             }
 
-            element.addEventListener("pointermove", (e) => {
-                this.inputs['cursor_x'] = e.clientX;
-                this.inputs['cursor_y'] = e.clientY;
-            }, { passive: false });
-            element.addEventListener("mousemove", (e) => {
-                this.inputs['cursor_x'] = e.clientX;
-                this.inputs['cursor_y'] = e.clientY;
-            }, { passive: false });
+            element.addEventListener(
+                "pointermove",
+                (e) => {
+                    this.inputs["cursor_x"] = e.clientX;
+                    this.inputs["cursor_y"] = e.clientY;
+                },
+                { passive: false }
+            );
+            element.addEventListener(
+                "mousemove",
+                (e) => {
+                    this.inputs["cursor_x"] = e.clientX;
+                    this.inputs["cursor_y"] = e.clientY;
+                },
+                { passive: false }
+            );
+
+            if (this.tilt.enabled) {
+                this.#bindTiltUnlock(element);
+            }
         }
 
         isActive(action = "") {
-            return this.getKeyValue(action) !== 0;
+            return this.getInputValue(action) !== 0;
         }
 
         getInputValue(action = "") {
-            const mapped = this.bindings
-                .filter((b) => b.bind === action)
-                .map((b) => this.inputs[b.input] ?? 0);
-
+            const mapped = this.bindings.filter((b) => b.bind === action).map((b) => this.inputs[b.input] ?? 0);
             const direct = this.inputs[action] ?? 0;
             return Math.max(direct, ...mapped, 0);
+        }
+
+        async #bindTiltUnlock(element) {
+            const enable = async () => {
+                if (!this.tilt.enabled) return;
+
+                if (
+                    typeof DeviceOrientationEvent !== "undefined" &&
+                    typeof DeviceOrientationEvent.requestPermission === "function"
+                ) {
+                    try {
+                        const permission = await DeviceOrientationEvent.requestPermission();
+                        if (permission !== "granted") return;
+                    } catch {
+                        return;
+                    }
+                }
+
+                window.addEventListener("deviceorientation", (e) => this.#onTilt(e), { passive: true });
+                this.tilt.initialized = true;
+            };
+
+            element.addEventListener("pointerdown", enable, { once: true });
+            element.addEventListener("keydown", enable, { once: true });
+        }
+
+        #onTilt(e) {
+            const g = e.gamma;
+            this.tilt.gamma = Number.isFinite(g) ? g : 0;
         }
 
         update() {
@@ -172,6 +224,27 @@
                 this.inputs["gp_dash"] = Number(Boolean(ps_r2 || ps_x));
                 this.inputs["pause"] = Number(this.currentGamepad.buttons[9]?.pressed);
             }
+
+            if (this.tilt.enabled && this.tilt.initialized) {
+                const t = this.tilt;
+
+                t.smoothGamma += (t.gamma - t.smoothGamma) * t.smoothing;
+
+                let g = t.smoothGamma;
+                if (Math.abs(g) < t.deadzone) g = 0;
+
+                const clamped = Math.max(-t.maxGamma, Math.min(t.maxGamma, g));
+                const norm = clamped / t.maxGamma;
+
+                const left = norm < 0 ? Math.abs(norm) * t.scale : 0;
+                const right = norm > 0 ? Math.abs(norm) * t.scale : 0;
+
+                this.inputs["tilt_left"] = left;
+                this.inputs["tilt_right"] = right;
+            } else {
+                this.inputs["tilt_left"] = 0;
+                this.inputs["tilt_right"] = 0;
+            }
         }
 
         #onPointerDown(e) {
@@ -182,7 +255,9 @@
             this.swipe.startY = this.swipe.lastY = e.clientY;
             this.swipe.startT = performance.now();
 
-            try { e.target.setPointerCapture?.(e.pointerId); } catch { }
+            try {
+                e.target.setPointerCapture?.(e.pointerId);
+            } catch { }
             e.preventDefault?.();
         }
 
@@ -229,8 +304,214 @@
         }
     }
 
+
+    class AudioManager {
+        constructor() {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            this.ctx = new AudioCtx();
+
+            this.master = this.ctx.createGain();
+            this.master.connect(this.ctx.destination);
+
+            this.musicBus = this.ctx.createGain();
+            this.sfxBus = this.ctx.createGain();
+
+            this.musicBus.connect(this.master);
+            this.sfxBus.connect(this.master);
+
+            this.buffers = new Map();
+
+            this.master.gain.value = 1;
+            this.musicBus.gain.value = 0.6;
+            this.sfxBus.gain.value = 1;
+
+            this.muted = false;
+
+            this._bgmSource = null;
+            this._bgmGain = null;
+            this._bgmUrl = null;
+        }
+
+        bindUnlock({ element = window } = {}) {
+            const unlock = async () => {
+                if (this.ctx.state !== "running") {
+                    try { await this.ctx.resume(); } catch { }
+                }
+            };
+            element.addEventListener("pointerdown", unlock, { once: true });
+            element.addEventListener("keydown", unlock, { once: true });
+            return unlock;
+        }
+
+        async load(url, key = url) {
+            if (this.buffers.has(key)) return this.buffers.get(key);
+
+            const res = await fetch(url);
+            const ab = await res.arrayBuffer();
+            const buf = await this.ctx.decodeAudioData(ab);
+            this.buffers.set(key, buf);
+            return buf;
+        }
+
+        get(key) {
+            return this.buffers.get(key) ?? null;
+        }
+
+        setMasterVolume(v) {
+            this.master.gain.value = Math.max(0, v);
+        }
+
+        setMusicVolume(v) {
+            this.musicBus.gain.value = Math.max(0, v);
+        }
+
+        setSfxVolume(v) {
+            this.sfxBus.gain.value = Math.max(0, v);
+        }
+
+        mute(on = true) {
+            this.muted = on;
+            this.master.gain.value = on ? 0 : 1;
+        }
+
+        toggleMute() {
+            this.mute(!this.muted);
+        }
+
+        playSfx(keyOrBuffer, {
+            volume = 1,
+            playbackRate = 1,
+            detune = 0,
+            when = 0,
+            offset = 0
+        } = {}) {
+            const buffer = typeof keyOrBuffer === "string" ? this.get(keyOrBuffer) : keyOrBuffer;
+            if (!buffer) return null;
+
+            const src = this.ctx.createBufferSource();
+            const gain = this.ctx.createGain();
+
+            src.buffer = buffer;
+            src.playbackRate.value = playbackRate;
+            src.detune.value = detune;
+
+            gain.gain.value = Math.max(0, volume);
+
+            src.connect(gain).connect(this.sfxBus);
+            src.start(this.ctx.currentTime + when, offset);
+
+            return { src, gain };
+        }
+
+        playSfxVar(key, {
+            volume = 1,
+            volumeJitter = 0.1,
+            rate = 1,
+            rateJitter = 0.15,
+            detuneJitter = 0
+        } = {}) {
+            const v = volume * (1 - volumeJitter / 2 + Math.random() * volumeJitter);
+            const r = rate * (1 - rateJitter / 2 + Math.random() * rateJitter);
+            const d = (Math.random() - 0.5) * detuneJitter;
+            return this.playSfx(key, { volume: v, playbackRate: r, detune: d });
+        }
+
+        playSfxAt(keyOrBuffer, x, y, listenerX, listenerY, {
+            volume = 1,
+            maxDist = 500,
+            panRange = 300,
+            playbackRate = 1
+        } = {}) {
+            const buffer = typeof keyOrBuffer === "string" ? this.get(keyOrBuffer) : keyOrBuffer;
+            if (!buffer) return null;
+
+            const src = this.ctx.createBufferSource();
+            const gain = this.ctx.createGain();
+            const pan = this.ctx.createStereoPanner();
+
+            const dx = x - listenerX;
+            const dy = y - listenerY;
+            const dist = Math.hypot(dx, dy);
+
+            const att = Math.max(0, 1 - dist / maxDist);
+            gain.gain.value = Math.max(0, volume * att);
+            pan.pan.value = Math.max(-1, Math.min(1, dx / panRange));
+
+            src.buffer = buffer;
+            src.playbackRate.value = playbackRate;
+
+            src.connect(pan).connect(gain).connect(this.sfxBus);
+            src.start();
+
+            return { src, gain, pan };
+        }
+
+        async playMusic(keyOrUrl, {
+            volume = 0.6,
+            fadeIn = 0.25,
+            restart = false
+        } = {}) {
+            const key = keyOrUrl;
+            const buffer = this.get(key) ?? (await this.load(keyOrUrl, keyOrUrl));
+
+            if (!restart && this._bgmSource && this._bgmUrl === keyOrUrl) return;
+
+            this.stopMusic({ fadeOut: 0.05 });
+
+            const src = this.ctx.createBufferSource();
+            const gain = this.ctx.createGain();
+
+            src.buffer = buffer;
+            src.loop = true;
+
+            const t0 = this.ctx.currentTime;
+            gain.gain.setValueAtTime(0, t0);
+            gain.gain.linearRampToValueAtTime(Math.max(0, volume), t0 + Math.max(0, fadeIn));
+
+            src.connect(gain).connect(this.musicBus);
+            src.start();
+
+            this._bgmSource = src;
+            this._bgmGain = gain;
+            this._bgmUrl = keyOrUrl;
+
+            return { src, gain };
+        }
+
+        stopMusic({ fadeOut = 0.2 } = {}) {
+            if (!this._bgmSource) return;
+
+            const src = this._bgmSource;
+            const gain = this._bgmGain;
+
+            const t0 = this.ctx.currentTime;
+            const end = t0 + Math.max(0, fadeOut);
+
+            try {
+                gain.gain.cancelScheduledValues(t0);
+                gain.gain.setValueAtTime(gain.gain.value, t0);
+                gain.gain.linearRampToValueAtTime(0, end);
+                src.stop(end + 0.01);
+            } catch {
+                try { src.stop(); } catch { }
+            }
+
+            this._bgmSource = null;
+            this._bgmGain = null;
+            this._bgmUrl = null;
+        }
+
+        async preload(list) {
+            await Promise.all(list.map((item) => {
+                if (typeof item === "string") return this.load(item, item);
+                return this.load(item.url, item.key ?? item.url);
+            }));
+        }
+    }
+
+
     class Particle extends GameObject {
-        constructor(x, y, vx, vy, life = 0.35, size = 3) {
+        constructor(x, y, vx, vy, life = 0.35, size = 3, fill = "#ffffff") {
             super();
             this.x = x; this.y = y;
             this.vx = vx; this.vy = vy;
@@ -238,6 +519,7 @@
             this.maxLife = life;
             this.size = size;
             this.dead = false;
+            this.fill = fill;
         }
 
         update(deltaTime) {
@@ -256,11 +538,12 @@
             ctx.globalAlpha = t;
             ctx.beginPath();
             ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fillStyle = this.fill;
             ctx.fill();
             ctx.restore();
         }
 
-        static burst(x, y, count = 12, callback = ()=>{}) {
+        static burst(x, y, count = 12, fill="#ffffff", callback = ()=>{}) {
             const parts = [];
             let time = 0;
             for (let i = 0; i < count; i++) {
@@ -272,7 +555,8 @@
                     Math.cos(a) * s,
                     Math.sin(a) * s,
                     t,
-                    2 + Math.random() * 3
+                    2 + Math.random() * 3,
+                    fill
                 ));
                 time += t;
             }
@@ -342,8 +626,11 @@
     let frames = 0;
     let lastTime = 0;
     let gameState = GAME_STATES.PAUSED;
-    const _inputManager = new InputManager({ element: _canvas });
+    const _inputManager = new InputManager({ element: window });
+    const _audioManager = new AudioManager();
     const _collision = new PixelCollision(_canvas.width, _canvas.height);
+    
+    _audioManager.bindUnlock({ element: window });
 
     function render(timestamp = 0){
         if(gameState === GAME_STATES.PAUSED) return requestAnimationFrame(render); 
@@ -390,8 +677,18 @@
             ctx.fill();
         }
         update(deltaTime, inputManager){
-            const cursor_x = inputManager.getInputValue('cursor_x');
-            this.x = Math.max( window.innerWidth * 0.1, Math.min( window.innerWidth * 0.9, cursor_x ))
+            // const cursor_x = inputManager.getInputValue('cursor_x');
+            // this.x = Math.max( window.innerWidth * 0.1, Math.min( window.innerWidth * 0.9, cursor_x ))
+
+            if(inputManager.isActive('right')){
+                this.x += window.innerWidth * 0.02;
+            }
+
+            if(inputManager.isActive('left')){
+                this.x -= window.innerWidth * 0.02;
+            }
+
+            this.x = Math.max( window.innerWidth * 0.1, Math.min( window.innerWidth * 0.9, this.x ))
         }
     }
 
@@ -423,9 +720,9 @@
 
         start() {
             this.x = window.innerWidth * Math.random();
-            this.y = -30 * Math.random() - 20;
+            this.y = -50 * Math.random() - 20;
 
-            this.size = Math.random() * 20 + 15;
+            this.size = Math.random() * 15 + 10;
             this.speedY = 120 * Math.random() + (this.minSpeedY ?? 100);
             this.speedX = 2 * Math.random() - 1;
             this.angle = 0;
@@ -462,6 +759,7 @@
         constructor(ensemble = 5){
             super();
             this.enemies = new Array(ensemble).fill({}).map(e=>new Enemy());
+            this.freeze = false;
         }
         
         start(){
@@ -478,6 +776,7 @@
             }
         }
         update(deltaTime, inputManager){
+            if(this.freeze) return;
             for (const enemy of this.enemies) {
                 enemy.update(deltaTime, inputManager);
             }
@@ -488,7 +787,7 @@
                 this.enemies.push(new Enemy());
             } else {
                 for (const enemy of this.enemies) {
-                    enemy.minSpeedY += Math.floor( Math.random() * 20 );
+                    enemy.minSpeedY += Math.floor( Math.random() * 50 );
                 }
             }
         }
@@ -498,7 +797,7 @@
         static type = 'food';
         start() {
             this.x = window.innerWidth * Math.random();
-            this.y = -30 * Math.random() - 20;
+            this.y = -50 * Math.random() - 20;
 
             this.radius = Math.random() * 10 + 5;
             this.speedY = 120 * Math.random() + 100;
@@ -521,6 +820,39 @@
             }
         }
     }
+
+    class PowerUps extends GameObject {
+        static type = 'powerups';
+        static POWERUP_TYPES = {
+            freeze: 0
+        }
+        start() {
+            this.x = window.innerWidth * Math.random();
+            this.y = -50 * Math.random() - 20;
+
+            this.radius = Math.random() * 10 + 5;
+            this.speedY = 120 * Math.random() + 100;
+            this.speedX = 20 * Math.random() - 10;
+            this.dead = false;
+            this.type = PowerUps.POWERUP_TYPES.freeze
+        }
+
+        render(canvas, ctx, deltaTime, opts = {}) {
+            ctx.beginPath();
+            ctx.fillStyle = opts.fill ?? "#e18504";
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        update(deltaTime, inputManager) {
+            const dt = deltaTime;
+            this.y += this.speedY * dt;
+            this.x += this.speedX * dt;
+            if (this.y - this.radius > window.innerHeight) {
+                this.dead = true;
+            }
+        }
+    }
     //#endregion
 
     //#region Game Logic
@@ -528,6 +860,7 @@
     const enemies = new EnemyEnsemble(1);
     const food = new Food();
     const gameManager = new EmptyObject();
+    const powerups = new PowerUps();
 
     const gameData = {
         best: Number( window.localStorage.getItem('GAME_DATA.best') ?? 0 ),
@@ -544,18 +877,25 @@
         points: document.querySelector('#points')
     }
 
-    const soundFx = {
-        collect: new Audio('collect.wav'),
-        hit: new Audio('hit.wav'),
+    function addPowerUp(){
+        setTimeout(()=>{
+            if(objects.findIndex(x=>x.id === powerups.id) === -1){
+                objects.push(powerups);
+                powerups.start();
+            }
+        }, 10000 * Math.random() + 5000);
     }
 
-    const music = new Audio('music.mp3');
-    music.loop = true;
-    music.volume = 0.3;
+
+    function playCollect(x, y){
+        _audioManager.playSfxAt("collect", window.innerWidth / 2, window.innerHeight / 2, x, y, { 
+            volume: 0.8,
+            maxDist: window.innerWidth * 0.4
+        });
+    }
 
     gameManager.updates.push((deltaTime, inputManager)=>{
         if (_collision.collide(player, enemies, deltaTime)) {
-            _ctx.fillStyle = "#fff";
             enemies.enemies = [];
             enemies.addEnemy();
             food.start();
@@ -563,13 +903,13 @@
             window.localStorage.setItem('GAME_DATA.best', gameData.best);
             uiElements.best.textContent = gameData.best;
             uiElements.pauseMenu.classList.add('show');
-            soundFx.hit.cloneNode().play();
-            objects = [...Particle.burst(player.x, player.y, 15)];
-            gameState = GAME_STATES.PAUSED;
+            _audioManager.playSfxVar("hit", { volume: 0.8, rateJitter: 0.2 });
+            objects = [...Particle.burst(player.x, player.y, 15, "#ffffff")];
+            //gameState = GAME_STATES.PAUSED;
         }
 
         if (_collision.collide(player, food, deltaTime)) {
-            objects.push(...Particle.burst(food.x, food.y, 5));
+            objects.push(...Particle.burst(food.x, food.y, 5, "#04e19e"));
             food.start();
             gameData.points += 1;
             uiElements.points.textContent = gameData.points;  
@@ -577,22 +917,55 @@
             _canvas.classList.remove("shake");
             void _canvas.offsetWidth;
             _canvas.classList.add("shake");
-            soundFx.collect.cloneNode().play();
+            playCollect(player.x, player.y);
         }
+
+        if (_collision.collide(player, powerups, deltaTime)) {
+            objects.push(...Particle.burst(powerups.x, powerups.y, 5, "#e18504"));
+            playCollect(powerups.x, powerups.y);
+            if(powerups.type === PowerUps.POWERUP_TYPES.freeze){
+                enemies.freeze = true;
+                setTimeout(()=>{
+                    enemies.freeze = false
+                    addPowerUp();
+                }, 3000);
+            }
+            powerups.y = -400000;
+            powerups.dead = true;
+        }
+
+        if(powerups.dead === true) addPowerUp();
     });
 
     function restartGame(){
         objects = [];
-        objects.push(new PlayerTrack(), player, enemies, food, gameManager);
+        player.start();
+        enemies.start();
+        food.start();
+        powerups.start();
+        objects.push(new PlayerTrack(), player, enemies, food, powerups, gameManager);
         uiElements.pauseMenu.classList.remove('show');
         uiElements.pauseMenu.classList.remove('first');
-        music.play();
         gameData.points = 0;
         gameState = GAME_STATES.PLAYING;
+        uiElements.points.textContent = '-';
     }
 
-    uiElements.startBtn.addEventListener('click', e=>restartGame());
 
+    _audioManager.preload([
+        { key: "hit", url: "hit.wav" },
+        { key: "collect", url: "collect.wav" },
+        { key: "bgm", url: "music.mp3" },
+    ]).then(e=>{
+        window.addEventListener("pointerdown", () => {
+            _audioManager.playMusic("bgm", { volume: 0.5 });
+        }, { once: true });
+        window.addEventListener("mousemove", () => {
+            _audioManager.playMusic("bgm", { volume: 0.5 });
+        }, { once: true });
+    });
+
+    uiElements.startBtn.addEventListener('click', e=>restartGame());
 
     //#endregion
 })()
