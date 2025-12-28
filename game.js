@@ -965,8 +965,12 @@
         }, { once: true });
     });
 
-    uiElements.startBtn.addEventListener('click', e=>restartGame());
+    uiElements.startBtn.addEventListener('click', async e=>{
+       await _inputManager.bindTiltUnlock(window);
+       restartGame()
+    });
 
     //#endregion
 
 })()
+
