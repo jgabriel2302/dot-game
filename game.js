@@ -157,7 +157,7 @@
             );
 
             if (this.tilt.enabled) {
-                this.#bindTiltUnlock(element);
+                this.bindTiltUnlock(element);
             }
         }
 
@@ -171,7 +171,7 @@
             return Math.max(direct, ...mapped, 0);
         }
 
-        async #bindTiltUnlock(element) {
+        async bindTiltUnlock(element) {
             const enable = async () => {
                 if (!this.tilt.enabled) return;
 
@@ -968,4 +968,5 @@
     uiElements.startBtn.addEventListener('click', e=>restartGame());
 
     //#endregion
+
 })()
