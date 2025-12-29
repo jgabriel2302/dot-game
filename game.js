@@ -98,6 +98,7 @@
             maxGamma: 25,
             scale: 1,
             initialized: false,
+            support: false
         };
 
         bindings = [
@@ -215,19 +216,24 @@
                         typeof DeviceOrientationEvent.requestPermission === "function"
                     ) {
                         const permission = await DeviceOrientationEvent.requestPermission();
+                        this.tilt.support = true;
                         if (permission !== "granted") return;
                     } else if (
                         typeof DeviceMotionEvent !== "undefined" &&
                         typeof DeviceMotionEvent.requestPermission === "function"
                     ) {
                         const permission = await DeviceMotionEvent.requestPermission();
+                        this.tilt.support = true;
                         if (permission !== "granted") return;
+                    } else {
+                        this.tilt.support = false;
                     }
 
                     window.addEventListener("deviceorientation", (e) => this.#onTilt(e), { passive: true });
                     this.tilt.initialized = true;
                     cleanup();
                 } catch (err) {
+                    this.tilt.support = false;
                     console.warn("Tilt permission request failed:", err);
                 }
             };
@@ -245,6 +251,7 @@
         }
 
         #onTilt(e) {
+            if(!this.tilt.support) return
             const g = e.gamma;
             this.tilt.gamma = Number.isFinite(g) ? g : 0;
         }
@@ -734,17 +741,15 @@
             const baseSpeed = window.innerWidth * 0.01;
             const tiltAxis = inputManager.inputs["tilt_axis"] ?? 0;
 
-            let direction = tiltAxis;
+            if(inputManager.tilt.support) this.x = tiltAxis * window.innerWidth + window.innerWidth / 2;
+            
             if(inputManager.isActive('right')){
-                direction += 1;
+                this.x += baseSpeed;
             }
 
             if(inputManager.isActive('left')){
-                direction -= 1;
+                this.x -= baseSpeed;
             }
-
-            direction = Math.max(-1, Math.min(1, direction));
-            this.x += direction * baseSpeed;
 
             this.x = Math.max( window.innerWidth * 0.05, Math.min( window.innerWidth * 0.95, this.x ))
         }
@@ -891,10 +896,10 @@
             if (isEffectActive("attract-food")) {
                 const dx = this.player.x - this.x;
                 const dy = this.player.y - this.y;
-                const dist = Math.hypot(dx, dy) || 0;
-                const pull = Math.min(0, 220 / dist);
-                this.x += dx * pull * dt * 6;
-                this.y += dy * pull * dt * 6;
+                const dist = Math.hypot(dx, dy) || 1;
+                const pull = Math.min(50, 50 / dist);
+                this.x += dx * pull * dt * 3;
+                this.y += dy * pull * dt * 3;                
             }
             if (this.y - this.radius > window.innerHeight) {
                 this.start();

@@ -1,4 +1,4 @@
-const CACHE_NAME = "circle-survivor-v5";
+const CACHE_NAME = "circle-survivor-v6";
 const ASSETS = [
   "./",
   "./index.html",
