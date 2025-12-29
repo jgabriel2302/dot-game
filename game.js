@@ -290,9 +290,11 @@
 
                 this.inputs["tilt_left"] = left;
                 this.inputs["tilt_right"] = right;
+                this.inputs["tilt_axis"] = norm * t.scale;
             } else {
                 this.inputs["tilt_left"] = 0;
                 this.inputs["tilt_right"] = 0;
+                this.inputs["tilt_axis"] = 0;
             }
         }
 
@@ -729,13 +731,20 @@
             ctx.fill();
         }
         update(deltaTime, inputManager){
+            const baseSpeed = window.innerWidth * 0.01;
+            const tiltAxis = inputManager.inputs["tilt_axis"] ?? 0;
+
+            let direction = tiltAxis;
             if(inputManager.isActive('right')){
-                this.x += window.innerWidth * 0.009;
+                direction += 1;
             }
 
             if(inputManager.isActive('left')){
-                this.x -= window.innerWidth * 0.009;
+                direction -= 1;
             }
+
+            direction = Math.max(-1, Math.min(1, direction));
+            this.x += direction * baseSpeed;
 
             this.x = Math.max( window.innerWidth * 0.05, Math.min( window.innerWidth * 0.95, this.x ))
         }
