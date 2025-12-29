@@ -731,22 +731,22 @@
         }
         update(deltaTime, inputManager){
             if(inputManager.isActive('right')){
-                this.x += window.innerWidth * 0.02;
+                this.x += window.innerWidth * 0.002;
             }
 
             if(inputManager.isActive('left')){
-                this.x -= window.innerWidth * 0.02;
+                this.x -= window.innerWidth * 0.002;
             }
 
-            this.x = Math.max( window.innerWidth * 0.1, Math.min( window.innerWidth * 0.9, this.x ))
+            this.x = Math.max( window.innerWidth * 0.05, Math.min( window.innerWidth * 0.95, this.x ))
         }
     }
 
     class PlayerTrack extends GameObject {
         static type = 'decorative';
         drawTrack(ctx) {
-            const start = window.innerWidth * 0.1;
-            const end = window.innerWidth * 0.9;
+            const start = window.innerWidth * 0.05;
+            const end = window.innerWidth * 0.95;
             const y = window.innerHeight / 2;
             const r = 10;
             ctx.beginPath();
