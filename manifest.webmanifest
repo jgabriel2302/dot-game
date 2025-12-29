@@ -1,0 +1,17 @@
+{
+  "name": "Circle Survivor",
+  "short_name": "Circle Survivor",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#1b2537",
+  "theme_color": "#1b2537",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

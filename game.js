@@ -3,6 +3,40 @@
 ####	    https://www.joaogabrielcorreadasilva.com.br                    	####
    ############################################################################## */
 (function(){
+    const _timers = [];
+    let _timerId = 0;
+    function scheduleTimeout(callback, ms = 0) {
+        const id = ++_timerId;
+        _timers.push({ id, callback, remaining: Math.max(0, ms) / 1000 });
+        return id;
+    }
+    function cancelTimeout(id) {
+        const idx = _timers.findIndex((t) => t.id === id);
+        if (idx >= 0) _timers.splice(idx, 1);
+    }
+    function updateTimers(deltaTime = 0) {
+        const ready = [];
+        for (let i = _timers.length - 1; i >= 0; i--) {
+            const t = _timers[i];
+            t.remaining -= deltaTime;
+            if (t.remaining <= 0) {
+                ready.push(t);
+                _timers.splice(i, 1);
+            }
+        }
+        for (const t of ready) {
+            try { t.callback?.(); } catch (err) { console.error(err); }
+        }
+    }
+
+    if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+            navigator.serviceWorker.register("sw.js").catch((err) => {
+                console.error("Service worker registration failed:", err);
+            });
+        });
+    }
+
     //#region Global Entities
     class GameObject {
         static type = "generic";
@@ -157,7 +191,7 @@
             );
 
             if (this.tilt.enabled) {
-                this.bindTiltUnlock(element);
+                this.#bindTiltUnlock(element);
             }
         }
 
@@ -171,28 +205,43 @@
             return Math.max(direct, ...mapped, 0);
         }
 
-        async bindTiltUnlock(element) {
-            const enable = async () => {
-                if (!this.tilt.enabled) return;
+        async #bindTiltUnlock(element) {
+            const requestTiltPermission = async () => {
+                if (!this.tilt.enabled || this.tilt.initialized) return;
 
-                if (
-                    typeof DeviceOrientationEvent !== "undefined" &&
-                    typeof DeviceOrientationEvent.requestPermission === "function"
-                ) {
-                    try {
+                try {
+                    if (
+                        typeof DeviceOrientationEvent !== "undefined" &&
+                        typeof DeviceOrientationEvent.requestPermission === "function"
+                    ) {
                         const permission = await DeviceOrientationEvent.requestPermission();
                         if (permission !== "granted") return;
-                    } catch {
-                        return;
+                    } else if (
+                        typeof DeviceMotionEvent !== "undefined" &&
+                        typeof DeviceMotionEvent.requestPermission === "function"
+                    ) {
+                        const permission = await DeviceMotionEvent.requestPermission();
+                        if (permission !== "granted") return;
                     }
-                }
 
-                window.addEventListener("deviceorientation", (e) => this.#onTilt(e), { passive: true });
-                this.tilt.initialized = true;
+                    window.addEventListener("deviceorientation", (e) => this.#onTilt(e), { passive: true });
+                    this.tilt.initialized = true;
+                    cleanup();
+                } catch (err) {
+                    console.warn("Tilt permission request failed:", err);
+                }
             };
 
-            element.addEventListener("pointerdown", enable, { once: true });
-            element.addEventListener("keydown", enable, { once: true });
+            const handler = () => requestTiltPermission();
+            const cleanup = () => {
+                ["pointerdown", "touchstart", "click", "keydown"].forEach((evt) =>
+                    element.removeEventListener(evt, handler)
+                );
+            };
+
+            ["pointerdown", "touchstart", "click", "keydown"].forEach((evt) =>
+                element.addEventListener(evt, handler, { passive: true })
+            );
         }
 
         #onTilt(e) {
@@ -298,7 +347,7 @@
 
         #pulse(key, ms, value = 1) {
             this.inputs[key] = value;
-            setTimeout(() => {
+            scheduleTimeout(() => {
                 if (this.inputs[key] === 1) this.inputs[key] = 0;
             }, ms);
         }
@@ -509,7 +558,6 @@
         }
     }
 
-
     class Particle extends GameObject {
         constructor(x, y, vx, vy, life = 0.35, size = 3, fill = "#ffffff") {
             super();
@@ -561,7 +609,7 @@
                 time += t;
             }
 
-            setTimeout(()=>callback(), time * 1000);
+            scheduleTimeout(() => callback(), time * 1000);
             return parts;
         }
     }
@@ -632,11 +680,16 @@
     
     _audioManager.bindUnlock({ element: window });
 
+    const PLAYER_DEFAULT_COLOR = "#04e19e";
+    let currentPlayerColor = PLAYER_DEFAULT_COLOR;
+    let playerColorStack = [];
+
     function render(timestamp = 0){
-        if(gameState === GAME_STATES.PAUSED) return requestAnimationFrame(render); 
-        _ctx.clearRect(0, 0, _canvas.width, _canvas.height);
         const deltaTime = (timestamp - lastTime) / 1000;
         lastTime = timestamp;
+        updateTimers(deltaTime);
+        if(gameState === GAME_STATES.PAUSED) return requestAnimationFrame(render); 
+        _ctx.clearRect(0, 0, _canvas.width, _canvas.height);
 
         _inputManager.update();
 
@@ -672,14 +725,11 @@
         }
         render(canvas, ctx, deltaTime, opts = {}) {
             ctx.beginPath();
-            ctx.fillStyle = opts.fill ?? "#04e19e";
+            ctx.fillStyle = opts.fill ?? currentPlayerColor;
             ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
             ctx.fill();
         }
         update(deltaTime, inputManager){
-            // const cursor_x = inputManager.getInputValue('cursor_x');
-            // this.x = Math.max( window.innerWidth * 0.1, Math.min( window.innerWidth * 0.9, cursor_x ))
-
             if(inputManager.isActive('right')){
                 this.x += window.innerWidth * 0.02;
             }
@@ -716,6 +766,7 @@
         constructor(){
             super();
             this.minSpeedY = 100;
+            this.dead = false;
         }
 
         start() {
@@ -752,6 +803,10 @@
             if (this.y - this.size > window.innerHeight) {
                 this.start();
             }
+        }
+
+        kill(){
+            return Particle.burst(this.x, this.y, this.size, "#ffffff")
         }
     }
 
@@ -791,6 +846,12 @@
                 }
             }
         }
+
+        kill(){
+            for (const enemy of this.enemies) {
+                enemy.kill();
+            }
+        }
     }
 
     class Food extends GameObject {
@@ -815,6 +876,14 @@
             const dt = deltaTime;
             this.y += this.speedY * dt;
             this.x += this.speedX * dt;
+            if (isEffectActive("attract-food")) {
+                const dx = player.x - this.x;
+                const dy = player.y - this.y;
+                const dist = Math.hypot(dx, dy) || 0;
+                const pull = Math.min(0, 220 / dist);
+                this.x += dx * pull * dt * 6;
+                this.y += dy * pull * dt * 6;
+            }
             if (this.y - this.radius > window.innerHeight) {
                 this.start();
             }
@@ -824,7 +893,18 @@
     class PowerUps extends GameObject {
         static type = 'powerups';
         static POWERUP_TYPES = {
-            freeze: 0
+            freeze: "freeze",
+            killAll: "kill-all",
+            attractFood: "attract-food",
+            doublePoints: "double-points",
+            untouchable: "untouchable",
+        };
+        static META = {
+            freeze: { fill: "#72daed", label: "Freeze", shape: "circle", duration: 3000 },
+            "kill-all": { fill: "#ff4d6d", label: "Kill All", shape: "square" },
+            "attract-food": { fill: "#e18504", label: "Attract Food", shape: "triangle", duration: 5000 },
+            "double-points": { fill: "#ffdd55", label: "Double Points", shape: "diamond", duration: 7000 },
+            untouchable: { fill: "#8f7efc", label: "Untouchable", shape: "pentagon", duration: 5000 },
         }
         start() {
             this.x = window.innerWidth * Math.random();
@@ -834,14 +914,68 @@
             this.speedY = 120 * Math.random() + 100;
             this.speedX = 20 * Math.random() - 10;
             this.dead = false;
-            this.type = PowerUps.POWERUP_TYPES.freeze
+            const types = Object.values(PowerUps.POWERUP_TYPES);
+            this.type = types[Math.floor(Math.random() * types.length)];
         }
 
         render(canvas, ctx, deltaTime, opts = {}) {
-            ctx.beginPath();
-            ctx.fillStyle = opts.fill ?? "#e18504";
-            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-            ctx.fill();
+            const meta = PowerUps.META[this.type] ?? {};
+            const fill = opts.fill ?? meta.fill ?? "#e18504";
+            const r = this.radius;
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.fillStyle = fill;
+            switch (meta.shape) {
+                case "square": {
+                    ctx.rotate(0.2);
+                    ctx.fillRect(-r, -r, r * 2, r * 2);
+                    break;
+                }
+                case "triangle": {
+                    ctx.beginPath();
+                    for (let i = 0; i < 3; i++) {
+                        const a = i * (Math.PI * 2 / 3) - Math.PI / 2;
+                        const px = Math.cos(a) * r * 1.3;
+                        const py = Math.sin(a) * r * 1.3;
+                        if (i === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                    break;
+                }
+                case "diamond": {
+                    ctx.beginPath();
+                    ctx.moveTo(0, -r * 1.4);
+                    ctx.lineTo(r * 1.1, 0);
+                    ctx.lineTo(0, r * 1.4);
+                    ctx.lineTo(-r * 1.1, 0);
+                    ctx.closePath();
+                    ctx.fill();
+                    break;
+                }
+                case "pentagon": {
+                    ctx.beginPath();
+                    for (let i = 0; i < 5; i++) {
+                        const a = i * (Math.PI * 2 / 5) - Math.PI / 2;
+                        const px = Math.cos(a) * r * 1.2;
+                        const py = Math.sin(a) * r * 1.2;
+                        if (i === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                    break;
+                }
+                case "circle":
+                default: {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, r, 0, Math.PI * 2);
+                    ctx.fill();
+                    break;
+                }
+            }
+            ctx.restore();
         }
 
         update(deltaTime, inputManager) {
@@ -861,6 +995,15 @@
     const food = new Food();
     const gameManager = new EmptyObject();
     const powerups = new PowerUps();
+    const activeEffects = {
+        freeze: false,
+        "attract-food": false,
+        "double-points": false,
+        untouchable: false
+    };
+    const effectTimers = {};
+    let powerupSpawnTimer = null;
+    let toastTimeoutId = null;
 
     const gameData = {
         best: Number( window.localStorage.getItem('GAME_DATA.best') ?? 0 ),
@@ -874,16 +1017,87 @@
         pauseBtn: document.querySelector('.in-game .actions #pauseBtn'),
         startBtn: document.querySelector('.in-pause #startBtn'),
         muteBtn: document.querySelector('.in-game .actions #muteBtn'),
-        points: document.querySelector('#points')
+        points: document.querySelector('#points'),
+        powerupToast: document.querySelector('.powerup-toast')
+    }
+
+    function isEffectActive(key){
+        return Boolean(activeEffects[key]);
+    }
+
+    function updatePlayerColor(){
+        const top = playerColorStack[playerColorStack.length - 1];
+        currentPlayerColor = top?.color ?? PLAYER_DEFAULT_COLOR;
+    }
+
+    function activateEffect(key, durationMs = 3000, color){
+        activeEffects[key] = true;
+        if (color) {
+            playerColorStack = playerColorStack.filter((c)=>c.key !== key);
+            playerColorStack.push({ key, color });
+            _canvas.style.setProperty("--powerup-color", (color) + "44");
+            updatePlayerColor();
+        }
+        if(effectTimers[key]) cancelTimeout(effectTimers[key]);
+        effectTimers[key] = scheduleTimeout(()=>{
+            activeEffects[key] = false;
+            playerColorStack = playerColorStack.filter((c)=>c.key !== key);
+            updatePlayerColor();
+            effectTimers[key] = null;            
+            _canvas.style.setProperty("--powerup-color", "#00000044");
+        }, durationMs);
+    }
+
+    function showPowerupToast(meta){
+        if(!uiElements.powerupToast || !meta?.label) return;
+        uiElements.powerupToast.textContent = meta.label;
+        uiElements.powerupToast.style.setProperty("--toast-color", meta.fill ?? "#04e19e");
+        uiElements.powerupToast.classList.add("show");
+        if(toastTimeoutId) cancelTimeout(toastTimeoutId);
+        toastTimeoutId = scheduleTimeout(()=>{
+            uiElements.powerupToast.classList.remove("show");
+            toastTimeoutId = null;
+        }, 1600);
     }
 
     function addPowerUp(){
-        setTimeout(()=>{
+        if(powerupSpawnTimer) return;
+        powerupSpawnTimer = scheduleTimeout(()=>{
             if(objects.findIndex(x=>x.id === powerups.id) === -1){
-                objects.push(powerups);
                 powerups.start();
+                objects.push(powerups);
             }
+            powerupSpawnTimer = null;
         }, 10000 * Math.random() + 5000);
+    }
+
+    function applyPowerUp(type){
+        const meta = PowerUps.META[type] ?? { label: type, fill: "#04e19e" };
+        showPowerupToast(meta);
+
+        if (type === PowerUps.POWERUP_TYPES.freeze) {
+            enemies.freeze = true;
+            activateEffect("freeze", meta.duration ?? 3000, meta.fill);
+        }
+
+        if (type === PowerUps.POWERUP_TYPES.killAll) {
+            for (const enemy of enemies.enemies) {
+                objects.push(...Particle.burst(enemy.x, enemy.y, 8, meta.fill));
+                enemy.start();
+            }
+        }
+
+        if (type === PowerUps.POWERUP_TYPES.attractFood) {
+            activateEffect("attract-food", meta.duration ?? 5000, meta.fill);
+        }
+
+        if (type === PowerUps.POWERUP_TYPES.doublePoints) {
+            activateEffect("double-points", meta.duration ?? 7000, meta.fill);
+        }
+
+        if (type === PowerUps.POWERUP_TYPES.untouchable) {
+            activateEffect("untouchable", meta.duration ?? 5000, meta.fill);
+        }
     }
 
 
@@ -895,7 +1109,10 @@
     }
 
     gameManager.updates.push((deltaTime, inputManager)=>{
-        if (_collision.collide(player, enemies, deltaTime)) {
+        enemies.freeze = isEffectActive("freeze");
+        const invincible = isEffectActive("untouchable");
+
+        if (!invincible && _collision.collide(player, enemies, deltaTime)) {
             enemies.enemies = [];
             enemies.addEnemy();
             food.start();
@@ -911,7 +1128,8 @@
         if (_collision.collide(player, food, deltaTime)) {
             objects.push(...Particle.burst(food.x, food.y, 5, "#04e19e"));
             food.start();
-            gameData.points += 1;
+            const gain = isEffectActive("double-points") ? 2 : 1;
+            gameData.points += gain;
             uiElements.points.textContent = gameData.points;  
             enemies.addEnemy();
             _canvas.classList.remove("shake");
@@ -921,15 +1139,10 @@
         }
 
         if (_collision.collide(player, powerups, deltaTime)) {
-            objects.push(...Particle.burst(powerups.x, powerups.y, 5, "#e18504"));
+            const meta = PowerUps.META[powerups.type] ?? {};
+            objects.push(...Particle.burst(powerups.x, powerups.y, 5, meta.fill ?? "#e18504"));
             playCollect(powerups.x, powerups.y);
-            if(powerups.type === PowerUps.POWERUP_TYPES.freeze){
-                enemies.freeze = true;
-                setTimeout(()=>{
-                    enemies.freeze = false
-                    addPowerUp();
-                }, 3000);
-            }
+            applyPowerUp(powerups.type);
             powerups.y = -400000;
             powerups.dead = true;
         }
@@ -938,6 +1151,24 @@
     });
 
     function restartGame(){
+        Object.keys(activeEffects).forEach(k=>{
+            activeEffects[k] = false;
+            if(effectTimers[k]) cancelTimeout(effectTimers[k]);
+            effectTimers[k] = null;
+        });
+        enemies.freeze = false;
+        if(powerupSpawnTimer) {
+            cancelTimeout(powerupSpawnTimer);
+            powerupSpawnTimer = null;
+        }
+        if(toastTimeoutId){
+            cancelTimeout(toastTimeoutId);
+            toastTimeoutId = null;
+        }
+        uiElements.powerupToast?.classList.remove("show");
+        playerColorStack = [];
+        currentPlayerColor = PLAYER_DEFAULT_COLOR;
+
         objects = [];
         player.start();
         enemies.start();
@@ -965,12 +1196,7 @@
         }, { once: true });
     });
 
-    uiElements.startBtn.addEventListener('click', async e=>{
-       await _inputManager.bindTiltUnlock(window);
-       restartGame()
-    });
+    uiElements.startBtn.addEventListener('click', e=>restartGame());
 
     //#endregion
-
 })()
-

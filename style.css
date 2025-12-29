@@ -38,7 +38,7 @@
 }
 
 * {
-   user-select: none;
+    user-select: none;
 }
 
 html, body {
@@ -76,11 +76,14 @@ html, body {
         }
     }
     & #game {
+        --powerup-color: #00000044;
         position: fixed;
         top: 0;
         left: 0;
         bottom: 0;
         right: 0;
+        background-image: radial-gradient(#00000000 50%, var(--powerup-color));
+        transition: all 0.3s ease;
         &.shake {
             animation: earthquake 250ms linear both;
         }
@@ -91,6 +94,29 @@ html, body {
         left: 0;
         right: 0;
         color: #fff;
+        & .powerup-toast {
+            position: fixed;
+            top: 12%;
+            left: 50%;
+            transform: translate(-50%, -10px) scale(0.95);
+            padding: 0.6em 1.6em;
+            border-radius: 999px;
+            border: 2px solid var(--toast-color, #04e19e);
+            background: #ffffff10;
+            color: #fff;
+            font-family: "Lilita One", "Lexend", sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            box-shadow: 0 6px 18px #00000055, 0 0 0 6px #ffffff05;
+            text-shadow: 0 0 16px var(--toast-color, #04e19e);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            &.show {
+                opacity: 1;
+                transform: translate(-50%, 0) scale(1);
+            }
+        }
         & .in-game {
             position: fixed;
             top: 0;
@@ -166,5 +192,4 @@ html, body {
             }
         }
     }
-
 }

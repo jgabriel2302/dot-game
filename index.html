@@ -9,12 +9,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1b2537">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icon.svg">
     <link rel="stylesheet" href="style.css">
-    <title>Game</title>
+    <title>Circle Survivor</title>
 </head>
 <body>
     <canvas id="game"></canvas>
     <div class="game-ui">
+        <div class="powerup-toast" aria-live="polite"></div>
         <div class="in-game">
             <div class="actions">
                 <button class="icon-only" id="pauseBtn"><span class="material-symbols-outlined">pause</span></button>

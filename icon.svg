@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Circle Survivor</title>
+  <desc id="desc">Green circle survivor icon with orbiting squares on a dark background.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1f2f46"/>
+      <stop offset="100%" stop-color="#131c2d"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="92" ry="92" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="124" fill="#04e19e"/>
+  <circle cx="256" cy="256" r="92" fill="none" stroke="#0cbf85" stroke-width="18" stroke-dasharray="24 22"/>
+  <g fill="#e18504">
+    <rect x="120" y="240" width="42" height="42" rx="8" transform="rotate(-12 141 261)"/>
+    <rect x="350" y="132" width="42" height="42" rx="8" transform="rotate(18 371 153)"/>
+    <rect x="330" y="332" width="42" height="42" rx="8" transform="rotate(-32 351 353)"/>
+  </g>
+</svg>
