@@ -864,6 +864,10 @@
 
     class Food extends GameObject {
         static type = 'food';
+        constructor(player){
+            super();
+            this.player = player || {x: 0, y: 0};
+        }
         start() {
             this.x = window.innerWidth * Math.random();
             this.y = -50 * Math.random() - 20;
@@ -885,8 +889,8 @@
             this.y += this.speedY * dt;
             this.x += this.speedX * dt;
             if (isEffectActive("attract-food")) {
-                const dx = player.x - this.x;
-                const dy = player.y - this.y;
+                const dx = this.player.x - this.x;
+                const dy = this.player.y - this.y;
                 const dist = Math.hypot(dx, dy) || 0;
                 const pull = Math.min(0, 220 / dist);
                 this.x += dx * pull * dt * 6;
@@ -1000,7 +1004,7 @@
     //#region Game Logic
     const player = new Player();
     const enemies = new EnemyEnsemble(1);
-    const food = new Food();
+    const food = new Food(player);
     const gameManager = new EmptyObject();
     const powerups = new PowerUps();
     const activeEffects = {
@@ -1164,7 +1168,6 @@
             if(effectTimers[k]) cancelTimeout(effectTimers[k]);
             effectTimers[k] = null;
         });
-        enemies.freeze = false;
         if(powerupSpawnTimer) {
             cancelTimeout(powerupSpawnTimer);
             powerupSpawnTimer = null;
