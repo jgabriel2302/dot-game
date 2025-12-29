@@ -353,7 +353,6 @@
         }
     }
 
-
     class AudioManager {
         constructor() {
             const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -731,11 +730,11 @@
         }
         update(deltaTime, inputManager){
             if(inputManager.isActive('right')){
-                this.x += window.innerWidth * 0.002;
+                this.x += window.innerWidth * 0.009;
             }
 
             if(inputManager.isActive('left')){
-                this.x -= window.innerWidth * 0.002;
+                this.x -= window.innerWidth * 0.009;
             }
 
             this.x = Math.max( window.innerWidth * 0.05, Math.min( window.innerWidth * 0.95, this.x ))
