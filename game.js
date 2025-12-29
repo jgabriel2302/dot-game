@@ -94,7 +94,7 @@
             gamma: 0,
             smoothGamma: 0,
             smoothing: 0.15,
-            deadzone: 2,
+            deadzone: 0,
             maxGamma: 25,
             scale: 1,
             initialized: false,
@@ -644,10 +644,10 @@
             ctx.clearRect(0, 0, this.c.width, this.c.height);
 
             ctx.fillStyle = "rgba(255, 0, 0, 1)";
-            a.render(this.c, ctx, deltaTime, { fill: "rgba(255, 0, 0, 1)" });
+            a.render(this.c, ctx, deltaTime, { collision: true, fill: "rgba(255, 0, 0, 1)" });
             
             ctx.fillStyle = "rgba(0, 0, 255, 0.5)";
-            b.render(this.c, ctx, deltaTime, { fill: "rgba(0, 0, 255, 0.5)" });
+            b.render(this.c, ctx, deltaTime, { collision: true, fill: "rgba(0, 0, 255, 0.5)" });
 
             const data = ctx.getImageData(0, this.c.height / 2 - this.c.height * 0.15 , this.c.width, this.c.height * 0.3).data;
             for (let i = 0; i < data.length; i += 4) {
@@ -731,12 +731,24 @@
             this.x = window.innerWidth / 2;
             this.y = window.innerHeight / 2;
         }
+
         render(canvas, ctx, deltaTime, opts = {}) {
+            ctx.beginPath();
+            if(!opts.collision) {
+                const gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius * 3 )
+                gradient.addColorStop(0, (opts.fill ?? currentPlayerColor) + "44");
+                gradient.addColorStop(1, (opts.fill ?? currentPlayerColor) + "00");
+                ctx.fillStyle = gradient;
+                ctx.arc(this.x, this.y, this.radius * 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
             ctx.beginPath();
             ctx.fillStyle = opts.fill ?? currentPlayerColor;
             ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
             ctx.fill();
         }
+
         update(deltaTime, inputManager){
             const baseSpeed = window.innerWidth * 0.01;
             const tiltAxis = inputManager.inputs["tilt_axis"] ?? 0;
@@ -761,7 +773,7 @@
             const start = window.innerWidth * 0.05;
             const end = window.innerWidth * 0.95;
             const y = window.innerHeight / 2;
-            const r = 10;
+            const r = 5;
             ctx.beginPath();
             ctx.fillStyle = "#00000033";
             ctx.arc(start, y, r, 0, Math.PI * 2);
@@ -769,6 +781,7 @@
             ctx.arc(end, y, r, 0, Math.PI * 2);
             ctx.fill();
         }
+
         render(canvas, ctx, deltaTime) {
             this.drawTrack(ctx);
         }
@@ -893,14 +906,18 @@
             const dt = deltaTime;
             this.y += this.speedY * dt;
             this.x += this.speedX * dt;
+            let power = 5;
+            let attractDist = 5;
             if (isEffectActive("attract-food")) {
-                const dx = this.player.x - this.x;
-                const dy = this.player.y - this.y;
-                const dist = Math.hypot(dx, dy) || 1;
-                const pull = Math.min(50, 50 / dist);
-                this.x += dx * pull * dt * 3;
-                this.y += dy * pull * dt * 3;                
+                power = 10;
+                attractDist = 50;
             }
+            const dx = this.player.x - this.x;
+            const dy = this.player.y - this.y;
+            const dist = Math.hypot(dx, dy) || 1;
+            const pull = Math.min(attractDist, attractDist / dist);
+            this.x += dx * pull * dt * power;
+            this.y += dy * pull * dt * power; 
             if (this.y - this.radius > window.innerHeight) {
                 this.start();
             }
