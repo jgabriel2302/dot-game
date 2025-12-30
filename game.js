@@ -668,6 +668,7 @@
         PAUSED: 0,
         PLAYING: 1
     }
+    const _canvasWrapper = document.getElementById('canvas-wrapper');
     const _canvas = document.getElementById('game') || document.createElement('canvas');
     _canvas.width = window.innerWidth;
     _canvas.height = window.innerHeight;
@@ -719,7 +720,7 @@
         requestAnimationFrame(render);
     }
     render();
-    document.body.prepend(_canvas);
+    _canvasWrapper.prepend(_canvas);
     //#endregion
 
 
@@ -932,13 +933,15 @@
             attractFood: "attract-food",
             doublePoints: "double-points",
             untouchable: "untouchable",
+            parallelUniverse: "parallel-universe"
         };
         static META = {
-            freeze: { fill: "#72daed", label: "Freeze", shape: "circle", duration: 3000 },
+            freeze: { fill: "#72daed", label: "Freeze", shape: "random", duration: 3000 },
             "kill-all": { fill: "#ff4d6d", label: "Kill All", shape: "square" },
             "attract-food": { fill: "#e18504", label: "Attract Food", shape: "triangle", duration: 5000 },
             "double-points": { fill: "#ffdd55", label: "Double Points", shape: "diamond", duration: 7000 },
             untouchable: { fill: "#8f7efc", label: "Untouchable", shape: "pentagon", duration: 5000 },
+            "parallel-universe": { fill: "#888888", stroke: "#aaaaaa", label: "Parallel Universe", shape: "circle", duration: 10000 },
         }
         start() {
             this.x = window.innerWidth * Math.random();
@@ -955,22 +958,38 @@
         render(canvas, ctx, deltaTime, opts = {}) {
             const meta = PowerUps.META[this.type] ?? {};
             const fill = opts.fill ?? meta.fill ?? "#e18504";
+            const stroke = opts.stroke ?? meta.stroke ?? "#00000000";
             const r = this.radius;
             ctx.save();
             ctx.translate(this.x, this.y);
             ctx.fillStyle = fill;
+            ctx.strokeStyle = stroke;
+            const rnd = (x)=>x + x * (Math.random() * 0.5)
             switch (meta.shape) {
                 case "square": {
                     ctx.rotate(0.2);
-                    ctx.fillRect(-r, -r, r * 2, r * 2);
+                    ctx.fillRect(-rnd(r), -rnd(r), rnd(r) * 2, rnd(r) * 2);
+                    break;
+                }
+                case "random": {
+                    ctx.beginPath();
+                    for (let i = 0; i < 360; i++) {
+                        const a = i * (Math.PI * 2 / 360) - Math.PI / 2;
+                        const px = Math.cos(a) * r * ( 0.7 + 1.3 * Math.random());
+                        const py = Math.sin(a) * r * ( 0.7 + 1.3 * Math.random());
+                        if (i === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
                     break;
                 }
                 case "triangle": {
                     ctx.beginPath();
                     for (let i = 0; i < 3; i++) {
                         const a = i * (Math.PI * 2 / 3) - Math.PI / 2;
-                        const px = Math.cos(a) * r * 1.3;
-                        const py = Math.sin(a) * r * 1.3;
+                        const px = Math.cos(a) * rnd(r) * 1.3;
+                        const py = Math.sin(a) * rnd(r) * 1.3;
                         if (i === 0) ctx.moveTo(px, py);
                         else ctx.lineTo(px, py);
                     }
@@ -980,10 +999,10 @@
                 }
                 case "diamond": {
                     ctx.beginPath();
-                    ctx.moveTo(0, -r * 1.4);
-                    ctx.lineTo(r * 1.1, 0);
-                    ctx.lineTo(0, r * 1.4);
-                    ctx.lineTo(-r * 1.1, 0);
+                    ctx.moveTo(0, -rnd(r) * 1.4);
+                    ctx.lineTo(rnd(r) * 1.1, 0);
+                    ctx.lineTo(0, rnd(r) * 1.4);
+                    ctx.lineTo(-rnd(r) * 1.1, 0);
                     ctx.closePath();
                     ctx.fill();
                     break;
@@ -992,8 +1011,8 @@
                     ctx.beginPath();
                     for (let i = 0; i < 5; i++) {
                         const a = i * (Math.PI * 2 / 5) - Math.PI / 2;
-                        const px = Math.cos(a) * r * 1.2;
-                        const py = Math.sin(a) * r * 1.2;
+                        const px = Math.cos(a) * rnd(r) * 1.2;
+                        const py = Math.sin(a) * rnd(r) * 1.2;
                         if (i === 0) ctx.moveTo(px, py);
                         else ctx.lineTo(px, py);
                     }
@@ -1102,7 +1121,7 @@
                 objects.push(powerups);
             }
             powerupSpawnTimer = null;
-        }, 10000 * Math.random() + 5000);
+        }, 7000 * Math.random() + 7000);
     }
 
     function applyPowerUp(type){
@@ -1132,6 +1151,11 @@
         if (type === PowerUps.POWERUP_TYPES.untouchable) {
             activateEffect("untouchable", meta.duration ?? 5000, meta.fill);
         }
+
+        if (type === PowerUps.POWERUP_TYPES.parallelUniverse) {
+            activateEffect("parallel-universe", meta.duration ?? 5000, meta.fill);
+            _canvasWrapper.classList.add('parallel-universe');
+        }
     }
 
 
@@ -1142,44 +1166,53 @@
         });
     }
 
+    function collectFood(){
+        objects.push(...Particle.burst(food.x, food.y, 5, "#04e19e"));
+        food.start();
+        const gain = isEffectActive("parallel-universe")? 4: isEffectActive("double-points") ? 2 : 1;
+        gameData.points += gain;
+        uiElements.points.textContent = gameData.points;  
+        enemies.addEnemy();
+        _canvas.classList.remove("shake");
+        void _canvas.offsetWidth;
+        _canvas.classList.add("shake");
+        playCollect(player.x, player.y);
+    }
+
+    function collectPowerUp(){
+        const meta = PowerUps.META[powerups.type] ?? {};
+        objects.push(...Particle.burst(powerups.x, powerups.y, 5, meta.fill ?? "#e18504"));
+        playCollect(powerups.x, powerups.y);
+        applyPowerUp(powerups.type);
+        powerups.y = -400000;
+        powerups.dead = true;
+    }
+
+    function die(){
+        enemies.enemies = [];
+        enemies.addEnemy();
+        food.start();
+        gameData.best = gameData.points > gameData.best? gameData.points: gameData.best;
+        window.localStorage.setItem('GAME_DATA.best', gameData.best);
+        uiElements.best.textContent = gameData.best;
+        uiElements.pauseMenu.classList.add('show');
+        _audioManager.playSfxVar("hit", { volume: 0.8, rateJitter: 0.2 });
+        objects = [...Particle.burst(player.x, player.y, 15, "#ffffff")];
+        if(_canvasWrapper.classList.contains('parallel-universe')) _canvasWrapper.classList.remove('parallel-universe');
+        //gameState = GAME_STATES.PAUSED;
+    }
+
     gameManager.updates.push((deltaTime, inputManager)=>{
         enemies.freeze = isEffectActive("freeze");
         const invincible = isEffectActive("untouchable");
 
-        if (!invincible && _collision.collide(player, enemies, deltaTime)) {
-            enemies.enemies = [];
-            enemies.addEnemy();
-            food.start();
-            gameData.best = gameData.points > gameData.best? gameData.points: gameData.best;
-            window.localStorage.setItem('GAME_DATA.best', gameData.best);
-            uiElements.best.textContent = gameData.best;
-            uiElements.pauseMenu.classList.add('show');
-            _audioManager.playSfxVar("hit", { volume: 0.8, rateJitter: 0.2 });
-            objects = [...Particle.burst(player.x, player.y, 15, "#ffffff")];
-            //gameState = GAME_STATES.PAUSED;
+        if (!invincible && _collision.collide(player, enemies, deltaTime)) die();
+        if (_collision.collide(player, food, deltaTime)) collectFood();
+        if(!isEffectActive("parallel-universe")){
+            if(_canvasWrapper.classList.contains('parallel-universe')) _canvasWrapper.classList.remove('parallel-universe');
         }
 
-        if (_collision.collide(player, food, deltaTime)) {
-            objects.push(...Particle.burst(food.x, food.y, 5, "#04e19e"));
-            food.start();
-            const gain = isEffectActive("double-points") ? 2 : 1;
-            gameData.points += gain;
-            uiElements.points.textContent = gameData.points;  
-            enemies.addEnemy();
-            _canvas.classList.remove("shake");
-            void _canvas.offsetWidth;
-            _canvas.classList.add("shake");
-            playCollect(player.x, player.y);
-        }
-
-        if (_collision.collide(player, powerups, deltaTime)) {
-            const meta = PowerUps.META[powerups.type] ?? {};
-            objects.push(...Particle.burst(powerups.x, powerups.y, 5, meta.fill ?? "#e18504"));
-            playCollect(powerups.x, powerups.y);
-            applyPowerUp(powerups.type);
-            powerups.y = -400000;
-            powerups.dead = true;
-        }
+        if (_collision.collide(player, powerups, deltaTime)) collectPowerUp();
 
         if(powerups.dead === true) addPowerUp();
     });
@@ -1213,6 +1246,8 @@
         gameData.points = 0;
         gameState = GAME_STATES.PLAYING;
         uiElements.points.textContent = '-';
+        _canvas.style.setProperty("--powerup-color", "#00000044");
+        if(_canvasWrapper.classList.contains('parallel-universe')) _canvasWrapper.classList.remove('parallel-universe');
     }
 
 
